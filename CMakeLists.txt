@@ -9,6 +9,7 @@ find_package(catkin REQUIRED
     open_karto
     rosconsole
     roscpp
+    gmapping
     sensor_msgs
     sparse_bundle_adjustment
     tf
@@ -18,6 +19,8 @@ find_package(Eigen REQUIRED)
 
 include_directories(${catkin_INCLUDE_DIRS} ${EIGEN_INCLUDE_DIRS})
 add_definitions(${EIGEN_DEFINITIONS})
+
+
 
 catkin_package()
 

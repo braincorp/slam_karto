@@ -31,12 +31,13 @@
 #include "tf/transform_listener.h"
 #include "tf/message_filter.h"
 #include "visualization_msgs/MarkerArray.h"
-
+#include "std_srvs/Empty.h"
 #include "nav_msgs/MapMetaData.h"
 #include "sensor_msgs/LaserScan.h"
 #include "nav_msgs/GetMap.h"
 #include "nav_msgs/Path.h"
 
+#include "gmapping/GetRoute.h"
 #include "open_karto/Mapper.h"
 #include "open_karto/Karto.h"
 #include "spa_solver.h"
@@ -59,6 +60,12 @@ class SlamKarto
     void laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan);
     bool mapCallback(nav_msgs::GetMap::Request  &req,
                      nav_msgs::GetMap::Response &res);
+    bool begin_mappingCallback(std_srvs::Empty::Request  &req,
+				    std_srvs::Empty::Response  &res);
+    bool stop_mappingCallback(std_srvs::Empty::Request  &req,
+				    std_srvs::Empty::Response  &res);
+	bool get_routeCallback(gmapping::GetRoute::Request  &req,
+				       gmapping::GetRoute::Response  &route);
 
   private:
     bool getOdomPose(karto::Pose2& karto_pose, const ros::Time& t);
@@ -71,6 +78,9 @@ class SlamKarto
     void publishLoop(double transform_publish_period);
     void publishGraphVisualization();
     void publishRoute();
+    void init();
+    
+    bool asked_to_begin_;
 
     // ROS handles
     ros::NodeHandle node_;
@@ -83,9 +93,15 @@ class SlamKarto
     ros::Publisher path_publisher_;
     ros::Publisher sstm_;
     ros::ServiceServer ss_;
+    ros::ServiceServer ss_begin_;
+    ros::ServiceServer ss_stop_;
+    ros::ServiceServer ss_route_;
 
     // The map that will be published / send to service callers
     nav_msgs::GetMap::Response map_;
+    
+    //Keep latest trajectory in case it is requested
+    nav_msgs::Path most_recent_trajectory_;
 
     // Storage for ROS parameters
     std::string odom_frame_;
@@ -114,12 +130,26 @@ class SlamKarto
     bool inverted_laser_;
 };
 
-SlamKarto::SlamKarto() :
-        got_map_(false),
-        laser_count_(0),
-        transform_thread_(NULL),
-        marker_count_(0)
+
+
+
+SlamKarto::SlamKarto() {
+
+init();
+
+}
+
+
+
+void SlamKarto::init()
+
 {
+
+        got_map_=(false);
+        laser_count_=(0);
+        transform_thread_=(NULL);
+        marker_count_=(0);
+
   map_to_odom_.setIdentity();
   // Retrieve parameters
   ros::NodeHandle private_nh_("~");
@@ -146,12 +176,15 @@ SlamKarto::SlamKarto() :
   }
   double transform_publish_period;
   private_nh_.param("transform_publish_period", transform_publish_period, 0.05);
-
+  asked_to_begin_ = false;
   // Set up advertisements and subscriptions
   tfB_ = new tf::TransformBroadcaster();
   sst_ = node_.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
   sstm_ = node_.advertise<nav_msgs::MapMetaData>("map_metadata", 1, true);
   ss_ = node_.advertiseService("dynamic_map", &SlamKarto::mapCallback, this);
+  ss_begin_ = node_.advertiseService("begin_mapping", &SlamKarto::begin_mappingCallback, this);
+  ss_stop_ = node_.advertiseService("stop_mapping", &SlamKarto::stop_mappingCallback, this);
+  ss_route_ = node_.advertiseService("get_route", &SlamKarto::get_routeCallback, this);  
   scan_filter_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(node_, "scan", 5);
   scan_filter_ = new tf::MessageFilter<sensor_msgs::LaserScan>(*scan_filter_sub_, tf_, odom_frame_, 5);
   scan_filter_->registerCallback(boost::bind(&SlamKarto::laserCallback, this, _1));
@@ -288,7 +321,9 @@ SlamKarto::SlamKarto() :
   // Set solver to be used in loop closure
   solver_ = new SpaSolver();
   mapper_->SetScanSolver(solver_);
+
 }
+
 
 SlamKarto::~SlamKarto()
 {
@@ -595,6 +630,9 @@ SlamKarto::publishGraphVisualization()
 void
 SlamKarto::laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
 {
+  if (!asked_to_begin_)
+    return;
+
   laser_count_++;
   if ((laser_count_ % throttle_scans_) != 0)
     return;
@@ -614,6 +652,9 @@ SlamKarto::laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
   karto::Pose2 odom_pose;
   if(addScan(laser, scan, odom_pose))
   {
+  
+    ROS_DEBUG("scan processed");
+  
     ROS_DEBUG("added scan at pose: %.3f %.3f %.3f", 
               odom_pose.GetX(),
               odom_pose.GetY(),
@@ -632,7 +673,8 @@ SlamKarto::laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
         ROS_DEBUG("Updated the map");
       }
     }
-  }
+  } else
+    ROS_DEBUG("cannot process scan");
 }
 
 bool
@@ -796,12 +838,11 @@ SlamKarto::mapCallback(nav_msgs::GetMap::Request  &req,
 }
 
 
-/** For later
-
 bool
 SlamKarto::begin_mappingCallback(std_srvs::Empty::Request  &req,
 				    std_srvs::Empty::Response  &res)
 {
+  ROS_WARN("BEGIN MAPPING - service called."); 
   asked_to_begin_ = true;
 
   return true;
@@ -812,8 +853,10 @@ bool
 SlamKarto::stop_mappingCallback(std_srvs::Empty::Request  &req,
 				    std_srvs::Empty::Response  &res)
 {
+  ROS_WARN("STOP MAPPING - service called... resetting mapping data...");
   asked_to_begin_ = false;
   init();
+  ROS_WARN("STOP MAPPING - ... service returning.");
   return true;
 }
 
@@ -826,9 +869,9 @@ SlamKarto::get_routeCallback(gmapping::GetRoute::Request  &req,
   route.plan.header.stamp = ros::Time::now();
   route.plan.header.frame_id = tf_.resolve( map_frame_ );
 
-  ROS_WARN("GET_ROUTE - service returning.");
+  ROS_WARN("GET_ROUTE - ... service returning.");
   return true;
-}*/
+}
 
 int
 main(int argc, char** argv)
