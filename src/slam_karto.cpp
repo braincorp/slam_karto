@@ -496,9 +496,9 @@ SlamKarto::publishRoute()
         tf::Vector3(pose_karto.GetX(),  pose_karto.GetY(), 0.0)
       );
     //  * laser_to_base;
-
+    // ROS_WARN("lrs->GetTime():  %f", lrs->GetTime());
     geometry_msgs::PoseStamped pose;
-    pose.header.stamp = ros::Time::now(); // ros::Time(stampedPoint->stamp);
+    pose.header.stamp = ros::Time(lrs->GetTime()); // ros::Time(stampedPoint->stamp);
     tf::quaternionTFToMsg(transform.getRotation(), pose.pose.orientation);
     tf::pointTFToMsg(transform.getOrigin(), pose.pose.position);
     path.poses.push_back(pose);
@@ -779,7 +779,6 @@ SlamKarto::addScan(karto::LaserRangeFinder* laser,
   if((processed = mapper_->Process(range_scan)))
   {
     //std::cout << "Pose: " << range_scan->GetOdometricPose() << " Corrected Pose: " << range_scan->GetCorrectedPose() << std::endl;
-    
     karto::Pose2 corrected_pose = range_scan->GetCorrectedPose();
 
     // Compute the map->odom transform
@@ -803,6 +802,7 @@ SlamKarto::addScan(karto::LaserRangeFinder* laser,
 
 
     // Add the localized range scan to the dataset (for memory management)
+    range_scan->SetTime(scan->header.stamp.toSec());
     dataset_->Add(range_scan);
   }
   else
