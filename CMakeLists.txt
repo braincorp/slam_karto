@@ -20,6 +20,7 @@ add_service_files(
     srv
   FILES
     GetRoute.srv
+    GetRouteHires.srv
 )
 
 generate_messages(DEPENDENCIES std_msgs nav_msgs)
