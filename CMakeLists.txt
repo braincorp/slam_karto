@@ -14,6 +14,17 @@ find_package(catkin REQUIRED
     tf
     visualization_msgs
 )
+
+add_service_files(
+  DIRECTORY
+    srv
+  FILES
+    GetRoute.srv
+    GetRouteHires.srv
+)
+
+generate_messages(DEPENDENCIES std_msgs nav_msgs)
+
 find_package(Eigen REQUIRED)
 
 include_directories(${catkin_INCLUDE_DIRS} ${EIGEN_INCLUDE_DIRS})
